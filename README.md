@@ -1,4 +1,4 @@
-# Vibe Weather Dashboards
+
 Weather Dashboards made with Vibe Coding
 
 First Example:
