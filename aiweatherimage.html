@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Dashboard</title>
+    
+    <!-- iOS Fullscreen Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- MQTT.js library -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            color: white;
+            text-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+            transition: background-image 1s ease-in-out;
+        }
+        #dashboard-container {
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            transition: background-image 1s ease-in-out;
+        }
+        .info-block {
+            background-color: rgba(0, 0, 0, 0.3);
+            border-radius: 0.75rem;
+            padding: 1rem 1.5rem;
+        }
+        /* Hide the banner by default */
+        #ios-prompt {
+            display: none;
+        }
+    </style>
+</head>
+<body class="bg-black">
+
+    <!-- Prompt for iOS users to add to home screen -->
+    <div id="ios-prompt" class="fixed top-0 left-0 right-0 bg-gray-800 text-white p-3 text-center z-50">
+        <span>For a fullscreen experience, tap the Share icon and then 'Add to Home Screen'.</span>
+        <button id="close-ios-prompt" class="absolute top-3 right-4 text-xl font-bold">&times;</button>
+    </div>
+
+    <div id="dashboard-container" class="h-screen w-screen flex flex-col justify-between p-6 md:p-8">
+        <!-- Top Row: Time/Date and Weather -->
+        <header class="flex justify-between items-start gap-4">
+            <!-- Time and Date -->
+            <div id="time-date-block" class="info-block">
+                <div id="time" class="text-4xl md:text-6xl font-bold">12:00 PM</div>
+                <div id="date" class="text-lg md:text-2xl">Monday, July 14</div>
+            </div>
+
+            <!-- Weather -->
+            <div id="weather-block" class="info-block text-right">
+                <div id="temperature" class="text-4xl md:text-6xl font-bold">--°</div>
+                
+                <!-- Extended weather details -->
+                <div class="text-sm md:text-base space-y-1 text-gray-200 mt-2">
+                    <div>Wind Max: <span id="wind-max" class="font-semibold">-- mph</span></div>
+                    <div>Pressure: <span id="pressure" class="font-semibold">-- hPa</span></div>
+                    <div>Rainfall: <span id="rainfall" class="font-semibold">-- mm</span></div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Bottom Row: Attribution Text & Fullscreen Toggle -->
+        <footer class="w-full flex justify-between items-center">
+             <p class="text-sm text-gray-300 text-left" style="text-shadow: 0 1px 3px rgba(0,0,0,0.7);">
+                AI Image created using Googles Vertex with Data Interpreted from the Met Office Forecast API
+            </p>
+            <button id="fullscreen-button" class="p-2 rounded-full hover:bg-black/50 transition-colors">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3.75v4.5m0-4.5h4.5m-4.5 0L9 9M3.75 20.25v-4.5m0 4.5h4.5m-4.5 0L9 15M20.25 3.75h-4.5m4.5 0v4.5m0-4.5L15 9m5.25 11.25h-4.5m4.5 0v-4.5m0 4.5L15 15" />
+                </svg>
+            </button>
+        </footer>
+    </div>
+
+    <script>
+        // --- CONFIGURATION ---
+        const backgroundImageUrl = 'http://www.finchamweather.co.uk/image.jpeg';
+        const imageRefreshInterval = 60000; // 1 minute
+
+        // --- DOM ELEMENTS ---
+        const dashboardContainer = document.getElementById('dashboard-container');
+        const timeElement = document.getElementById('time');
+        const dateElement = document.getElementById('date');
+        const tempElement = document.getElementById('temperature');
+        const pressureElement = document.getElementById('pressure');
+        const windMaxElement = document.getElementById('wind-max');
+        const rainfallElement = document.getElementById('rainfall');
+        const fullscreenButton = document.getElementById('fullscreen-button');
+        const iosPrompt = document.getElementById('ios-prompt');
+        const closeIosPromptBtn = document.getElementById('close-ios-prompt');
+
+        /**
+         * Updates the background image of the dashboard.
+         */
+        function updateBackgroundImage() {
+            const uniqueUrl = `${backgroundImageUrl}?t=${new Date().getTime()}`;
+            const img = new Image();
+            img.onload = () => {
+                dashboardContainer.style.backgroundImage = `url('${uniqueUrl}')`;
+                console.log(`Background image updated at ${new Date().toLocaleTimeString()}`);
+            };
+            img.onerror = () => {
+                console.error("Failed to load background image.");
+            };
+            img.src = uniqueUrl;
+        }
+
+        /**
+         * Updates the time and date display every second.
+         */
+        function updateTime() {
+            const now = new Date();
+            timeElement.textContent = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            dateElement.textContent = now.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+        }
+        
+        /**
+         * Connects to the MQTT broker and subscribes to weather topics.
+         */
+        function connectMqtt() {
+            // Corrected Broker URL from the user's working example
+            const brokerUrl = "wss://mqtt.cetools.org:8081";
+            const options = {
+                clientId: "DAKboard-Clone-" + Math.random().toString(16).substr(2, 8)
+            };
+
+            console.log("Attempting to connect to MQTT broker at " + brokerUrl);
+            const client = mqtt.connect(brokerUrl, options);
+
+            client.on("connect", function() {
+                console.log("MQTT connected successfully!");
+                // Subscribe to the specific topics from the user's working example
+                client.subscribe("personal/ucfnaps/downhamweather/loop");   // Contains Temp, Pressure, Rainfall
+                client.subscribe("personal/ucfnaps/downhamweather/windmax"); // Contains Wind Max
+            });
+
+            client.on("message", function(topic, message) {
+                const payload = message.toString();
+                // console.log(`Received message from ${topic}: ${payload}`);
+
+                // Update the dashboard based on the topic
+                if (topic === "personal/ucfnaps/downhamweather/loop") {
+                    try {
+                        const data = JSON.parse(payload);
+                        // Update Temperature
+                        if (data.outTemp_C !== undefined) {
+                            tempElement.textContent = `${parseFloat(data.outTemp_C).toFixed(1)}°`;
+                        }
+                        // Update Pressure
+                        if (data.barometer_mbar !== undefined) {
+                            pressureElement.textContent = `${parseFloat(data.barometer_mbar).toFixed(1)} hPa`;
+                        }
+                        // Update Rainfall
+                        if (data.dayRain_mm !== undefined) {
+                            rainfallElement.textContent = `${parseFloat(data.dayRain_mm).toFixed(1)} mm`;
+                        }
+                    } catch (e) {
+                        console.error("Error parsing JSON from loop topic:", e);
+                    }
+                } else if (topic === "personal/ucfnaps/downhamweather/windmax") {
+                    windMaxElement.textContent = `${parseFloat(payload).toFixed(1)} mph`;
+                }
+            });
+
+            client.on("error", function(error) {
+                console.error("MQTT Connection Error:", error);
+            });
+        }
+        
+        /**
+         * Toggles fullscreen mode for the entire page.
+         */
+        function toggleFullScreen() {
+          if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(err => {
+              console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+            });
+          } else {
+            if (document.exitFullscreen) {
+              document.exitFullscreen();
+            }
+          }
+        }
+
+        // --- EVENT LISTENERS ---
+        fullscreenButton.addEventListener('click', toggleFullScreen);
+        
+        closeIosPromptBtn.addEventListener('click', () => {
+            iosPrompt.style.display = 'none';
+        });
+
+        // --- INITIALIZATION ---
+        window.onload = function() {
+            // Check if it's an iOS device and not in standalone (homescreen) mode
+            const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+            if (isIOS && !window.navigator.standalone) {
+                iosPrompt.style.display = 'block';
+            }
+
+            // Initial calls
+            updateTime();
+            updateBackgroundImage();
+            connectMqtt(); // Connect to MQTT instead of fetching via HTTP
+
+            // Set intervals
+            setInterval(updateTime, 1000);
+            setInterval(updateBackgroundImage, imageRefreshInterval);
+            // No longer need to poll for weather, MQTT will push updates.
+        };
+    </script>
+
+</body>
+</html>
