@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- iOS Full Screen Meta Tags -->
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Weather">
+    <title>Weather Dashboard | Downham Market</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
+    <!-- Weather Icons CSS -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/weather-icons/2.0.10/css/weather-icons.min.css">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .chart-container {
+            position: relative;
+        }
+        .tab-button {
+            transition: background-color 0.2s, color 0.2s;
+        }
+        .tab-button.active {
+            background-color: #3b82f6; /* bg-blue-600 */
+            color: white;
+        }
+    </style>
+</head>
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 antialiased">
+    <div class="p-3 md:p-4 min-h-screen">
+        <!-- Main Content Grid -->
+        <div id="weather-content" class="hidden max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-6 gap-5 w-full">
+            
+            <!-- Panel 1: Current & Hourly Forecast -->
+            <div class="lg:col-span-2 bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-5">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <h1 class="text-2xl font-bold text-gray-900 dark:text-white">Downham Market</h1>
+                        <p class="text-gray-500 dark:text-gray-400">Norfolk</p>
+                    </div>
+                    <div id="current-icon" class="text-5xl text-gray-700 dark:text-gray-300"></div>
+                </div>
+                <div class="mt-4">
+                    <p class="text-6xl font-extrabold text-gray-900 dark:text-white" id="current-temp">--°</p>
+                    <p class="text-lg font-medium text-gray-600 dark:text-gray-300" id="current-description">--</p>
+                </div>
+                <div class="mt-6 grid grid-cols-2 text-sm gap-x-4 gap-y-3">
+                    <p>Feels like: <strong id="feels-like-temp">--°</strong></p>
+                    <p>Precip: <strong id="precipitation">-- mm</strong></p>
+                    <p>Pressure: <strong id="pressure">-- hPa</strong><span id="pressure-trend" class="ml-1"></span></p>
+                    <p>Wind Gusts: <strong id="max-wind-gust">-- mph</strong></p>
+                    <p>Visibility: <strong id="visibility">-- km</strong></p>
+                    <p>Cloud Cover: <strong id="cloud-cover">--%</strong></p>
+                </div>
+                <div class="mt-6 pt-4 border-t border-gray-200 dark:border-gray-700">
+                    <h2 class="text-lg font-bold text-gray-800 dark:text-white mb-2">Next Hours</h2>
+                    <div id="hourly-forecast" class="flex justify-between text-center text-sm">
+                        <!-- Hourly data injected here -->
+                    </div>
+                </div>
+                 <p class="text-xs text-center text-gray-400 dark:text-gray-500 mt-4" id="last-updated">...</p>
+            </div>
+
+            <!-- Panel 2: Combined Chart Panel -->
+            <div class="lg:col-span-4 bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-4 flex flex-col">
+                <div class="flex justify-center mb-4 bg-gray-200 dark:bg-gray-700 rounded-lg p-1">
+                    <button id="temp-tab" class="tab-button active w-1/2 py-1 rounded-md text-sm font-semibold">Temperature & Precip</button>
+                    <button id="wind-tab" class="tab-button w-1/2 py-1 rounded-md text-sm font-semibold">Wind & Pressure</button>
+                </div>
+                 <div id="temp-chart-container" class="chart-container flex-grow"><canvas id="temp-precip-chart"></canvas></div>
+                 <div id="wind-chart-container" class="chart-container flex-grow hidden"><canvas id="wind-chart"></canvas></div>
+            </div>
+
+            <!-- Panel 3: 7-Day Forecast -->
+            <div class="lg:col-span-6 bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-4">
+                <h2 class="text-lg font-bold text-gray-800 dark:text-white mb-2">7-Day Forecast</h2>
+                <div id="weekly-forecast" class="flex justify-around text-center text-sm">
+                    <!-- Weekly data injected here -->
+                </div>
+            </div>
+
+        </div>
+        <!-- Loading & Error States -->
+        <div id="loading" class="text-center">
+            <p class="text-lg text-gray-500">Fetching latest weather data...</p>
+        </div>
+        <div id="error-message" class="hidden text-center bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-4 rounded-lg">
+            <p>Could not fetch weather data. Please try again later.</p>
+        </div>
+    </div>
+
+    <script>
+        // --- Chart instances & Global Config ---
+        let tempChart, windChart;
+        Chart.defaults.color = document.body.classList.contains('dark') ? '#e5e7eb' : '#374151';
+        Chart.defaults.borderColor = document.body.classList.contains('dark') ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.1)';
+
+        // --- Main App Logic ---
+        document.addEventListener('DOMContentLoaded', () => {
+            setupTabs();
+            fetchWeather();
+            setInterval(fetchWeather, 300000); // Auto-refresh every 5 minutes
+        });
+        
+        function setupTabs() {
+            const tempTab = document.getElementById('temp-tab');
+            const windTab = document.getElementById('wind-tab');
+            const tempChartContainer = document.getElementById('temp-chart-container');
+            const windChartContainer = document.getElementById('wind-chart-container');
+
+            tempTab.addEventListener('click', () => {
+                tempTab.classList.add('active');
+                windTab.classList.remove('active');
+                tempChartContainer.classList.remove('hidden');
+                windChartContainer.classList.add('hidden');
+            });
+
+            windTab.addEventListener('click', () => {
+                windTab.classList.add('active');
+                tempTab.classList.remove('active');
+                windChartContainer.classList.remove('hidden');
+                tempChartContainer.classList.add('hidden');
+            });
+        }
+
+        async function fetchWeather() {
+            const latitude = 52.60;
+            const longitude = 0.37;
+            const apiUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,apparent_temperature,is_day,precipitation,weather_code,cloud_cover,surface_pressure,wind_gusts_10m,visibility&hourly=temperature_2m,precipitation_probability,precipitation,weather_code,is_day,surface_pressure,wind_gusts_10m,visibility&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_sum,wind_gusts_10m_max&wind_speed_unit=mph&timezone=auto&models=best_match`;
+            
+            const loadingEl = document.getElementById('loading');
+            const contentEl = document.getElementById('weather-content');
+            const errorEl = document.getElementById('error-message');
+
+            if (!contentEl.classList.contains('hidden')) {
+                document.getElementById('last-updated').textContent = 'Updating...';
+            } else {
+                loadingEl.classList.remove('hidden');
+            }
+            errorEl.classList.add('hidden');
+
+            try {
+                const response = await fetch(apiUrl);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                displayCurrentWeather(data);
+                displayWeeklyForecast(data);
+                displayCharts(data);
+
+                loadingEl.classList.add('hidden');
+                contentEl.classList.remove('hidden');
+            } catch (error) {
+                console.error("Error fetching weather data:", error);
+                loadingEl.classList.add('hidden');
+                contentEl.classList.add('hidden');
+                errorEl.classList.remove('hidden');
+            }
+        }
+
+        // --- Data Display Functions ---
+        function displayCurrentWeather(data) {
+            const current = data.current;
+            const hourly = data.hourly;
+            const now = new Date();
+            const currentHourIndex = hourly.time.findIndex(time => new Date(time) >= now);
+
+            document.getElementById('current-temp').textContent = `${current.temperature_2m.toFixed(1)}°`;
+            document.getElementById('current-description').textContent = getWeatherDescription(current.weather_code);
+            document.getElementById('feels-like-temp').textContent = `${current.apparent_temperature.toFixed(1)}°`;
+            document.getElementById('max-wind-gust').textContent = `${Math.round(current.wind_gusts_10m)} mph`;
+            document.getElementById('pressure').textContent = `${Math.round(current.surface_pressure)} hPa`;
+            document.getElementById('cloud-cover').textContent = `${current.cloud_cover}%`;
+            document.getElementById('precipitation').textContent = `${current.precipitation.toFixed(1)} mm`;
+            document.getElementById('visibility').textContent = `${(current.visibility / 1000).toFixed(1)} km`;
+            document.getElementById('current-icon').innerHTML = getWeatherIcon(current.weather_code, current.is_day);
+            document.getElementById('last-updated').textContent = `Last updated: ${now.toLocaleTimeString([], { hour: '2-digit', minute:'2-digit', hour12: false })}`;
+
+            // Pressure Trend Logic
+            const pressureTrendEl = document.getElementById('pressure-trend');
+            if (currentHourIndex >= 3) {
+                const pressureNow = hourly.surface_pressure[currentHourIndex];
+                const pressure3HoursAgo = hourly.surface_pressure[currentHourIndex - 3];
+                const trendDiff = pressureNow - pressure3HoursAgo;
+                
+                let trendIcon = '';
+                if (trendDiff > 0.5) { 
+                    trendIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4 inline-block text-green-500"><path fill-rule="evenodd" d="M8 15a.75.75 0 0 1-.75-.75V2.56L4.03 5.78a.75.75 0 0 1-1.06-1.06l4.25-4.25a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 1 1-1.06 1.06L8.75 2.56v11.69a.75.75 0 0 1-.75.75z" clip-rule="evenodd" /></svg>`;
+                } else if (trendDiff < -0.5) { 
+                    trendIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4 inline-block text-red-500"><path fill-rule="evenodd" d="M8 1a.75.75 0 0 1 .75.75v11.69l3.22-3.22a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L4.22 11.28a.75.75 0 0 1 1.06-1.06l3.22 3.22V1.75A.75.75 0 0 1 8 1z" clip-rule="evenodd" /></svg>`;
+                } else {
+                    trendIcon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16" fill="currentColor" class="w-4 h-4 inline-block text-gray-400"><path fill-rule="evenodd" d="M1 8a.75.75 0 0 1 .75-.75h12.5a.75.75 0 0 1 0 1.5H1.75A.75.75 0 0 1 1 8z" clip-rule="evenodd" /></svg>`;
+                }
+                pressureTrendEl.innerHTML = trendIcon;
+            } else {
+                pressureTrendEl.innerHTML = ''; 
+            }
+
+            const hourlyContainer = document.getElementById('hourly-forecast');
+            hourlyContainer.innerHTML = '';
+            for (let i = 0; i < 5; i++) {
+                const index = currentHourIndex + i;
+                if (index < hourly.time.length) {
+                    const time = new Date(hourly.time[index]);
+                    hourlyContainer.innerHTML += `
+                        <div>
+                            <p class="font-bold">${time.getHours()}:00</p>
+                            <div class="text-4xl my-1">${getWeatherIcon(hourly.weather_code[index], hourly.is_day[index])}</div>
+                            <p>${Math.round(hourly.temperature_2m[index])}°</p>
+                            <p class="text-xs text-blue-500">${hourly.precipitation_probability[index]}%</p>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        function displayWeeklyForecast(data) {
+            const container = document.getElementById('weekly-forecast');
+            container.innerHTML = '';
+            for (let i = 0; i < 7; i++) {
+                const day = new Date(data.daily.time[i]);
+                const dayName = i === 0 ? 'Today' : day.toLocaleDateString('en-US', { weekday: 'short' });
+                container.innerHTML += `
+                     <div class="flex-1 p-1">
+                        <p class="font-bold">${dayName}</p>
+                        <div class="text-4xl my-1 mx-auto">${getWeatherIcon(data.daily.weather_code[i], 1)}</div>
+                        <p>
+                            <strong>${Math.round(data.daily.temperature_2m_max[i])}°</strong> / ${Math.round(data.daily.temperature_2m_min[i])}°
+                        </p>
+                        <p class="text-xs text-blue-400 mt-1">${data.daily.precipitation_sum[i].toFixed(1)} mm</p>
+                    </div>
+                `;
+            }
+        }
+
+        function displayCharts(data) {
+            const daily = data.daily;
+            const hourly = data.hourly;
+
+            const labels = daily.time.map((t, i) => {
+                const day = new Date(t);
+                return i === 0 ? 'Today' : day.toLocaleDateString('en-US', { weekday: 'short' });
+            });
+
+            const maxTempData = daily.temperature_2m_max;
+            const minTempData = daily.temperature_2m_min;
+            const precipData = daily.precipitation_sum;
+            const windGustData = daily.wind_gusts_10m_max;
+            
+            // Extract midday pressure for each of the 7 days
+            const pressureData = daily.time.map(dayString => {
+                const noonString = dayString + 'T12:00';
+                const noonIndex = hourly.time.findIndex(t => t.startsWith(noonString.substring(0, 13)));
+                return noonIndex !== -1 ? hourly.surface_pressure[noonIndex] : null;
+            });
+
+            if (tempChart) tempChart.destroy();
+            if (windChart) windChart.destroy();
+
+            // --- Temperature & Precipitation Chart (7-Day) ---
+            const tempCtx = document.getElementById('temp-precip-chart').getContext('2d');
+            tempChart = new Chart(tempCtx, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        { type: 'line', label: 'Max Temp (°C)', data: maxTempData, borderColor: '#ef4444', yAxisID: 'y_temp', tension: 0.4 },
+                        { type: 'line', label: 'Min Temp (°C)', data: minTempData, borderColor: '#3b82f6', yAxisID: 'y_temp', tension: 0.4 },
+                        { type: 'bar', label: 'Precip (mm)', data: precipData, backgroundColor: 'rgba(59, 130, 246, 0.3)', yAxisID: 'y_precip' }
+                    ]
+                },
+                options: { responsive: true, maintainAspectRatio: false, scales: { y_temp: { position: 'left', title: { display: true, text: '°C' } }, y_precip: { position: 'right', title: { display: true, text: 'mm' }, grid: { drawOnChartArea: false } } } }
+            });
+
+            // --- Wind & Pressure Chart (7-Day) ---
+            const windCtx = document.getElementById('wind-chart').getContext('2d');
+            windChart = new Chart(windCtx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [
+                        { 
+                            label: 'Max Wind Gusts (mph)', 
+                            data: windGustData, 
+                            borderColor: '#22c55e', 
+                            backgroundColor: 'rgba(34, 197, 94, 0.1)', 
+                            fill: true, 
+                            tension: 0.4,
+                            yAxisID: 'y_wind'
+                        },
+                        {
+                            type: 'line',
+                            label: 'Pressure (hPa)',
+                            data: pressureData,
+                            borderColor: '#a855f7', // Purple
+                            tension: 0.4,
+                            yAxisID: 'y_pressure'
+                        }
+                    ]
+                },
+                options: { 
+                    responsive: true, 
+                    maintainAspectRatio: false, 
+                    scales: { 
+                        y_wind: { position: 'left', beginAtZero: true, title: { display: true, text: 'mph' } },
+                        y_pressure: { position: 'right', title: { display: true, text: 'hPa' }, grid: { drawOnChartArea: false } }
+                    } 
+                }
+            });
+        }
+
+        // --- Helper Functions ---
+        function getWeatherDescription(code) {
+            const descriptions = { 0: "Clear", 1: "Mainly Clear", 2: "Partly Cloudy", 3: "Overcast", 45: "Fog", 48: "Rime Fog", 51: "Light Drizzle", 53: "Drizzle", 55: "Dense Drizzle", 56: "Light Freezing Drizzle", 57: "Dense Freezing Drizzle", 61: "Slight Rain", 63: "Rain", 65: "Heavy Rain", 66: "Light Freezing Rain", 67: "Heavy Freezing Rain", 71: "Slight Snow", 73: "Snow", 75: "Heavy Snow", 77: "Snow Grains", 80: "Slight Showers", 81: "Showers", 82: "Violent Showers", 85: "Slight Snow Showers", 86: "Heavy Snow Showers", 95: "Thunderstorm", 96: "Thunderstorm & Hail", 99: "Thunderstorm & Heavy Hail", };
+            return descriptions[code] || "Unknown";
+        }
+
+        function getWeatherIcon(code, isDay = 1) {
+            const icons = {
+                0: 'wi-day-sunny', 1: 'wi-day-sunny-overcast', 2: 'wi-day-cloudy', 3: 'wi-cloudy',
+                45: 'wi-fog', 48: 'wi-fog',
+                51: 'wi-sprinkle', 53: 'wi-sprinkle', 55: 'wi-sprinkle',
+                56: 'wi-rain-mix', 57: 'wi-rain-mix',
+                61: 'wi-showers', 63: 'wi-rain', 65: 'wi-rain-wind',
+                66: 'wi-hail', 67: 'wi-hail',
+                71: 'wi-snow', 73: 'wi-snow', 75: 'wi-snow-wind', 77: 'wi-snow',
+                80: 'wi-showers', 81: 'wi-showers', 82: 'wi-storm-showers',
+                85: 'wi-snow', 86: 'wi-snow-wind',
+                95: 'wi-thunderstorm', 96: 'wi-storm-showers', 99: 'wi-thunderstorm'
+            };
+            const nightIcons = {
+                0: 'wi-night-clear', 1: 'wi-night-alt-partly-cloudy', 2: 'wi-night-alt-cloudy', 3: 'wi-cloudy'
+            };
+            
+            let iconClass = icons[code] || 'wi-na';
+
+            if (!isDay && nightIcons.hasOwnProperty(code)) {
+                iconClass = nightIcons[code];
+            }
+            
+            return `<i class="wi ${iconClass}"></i>`;
+        }
+    </script>
+</body>
+</html>
+
